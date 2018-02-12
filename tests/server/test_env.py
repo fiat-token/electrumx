@@ -82,11 +82,8 @@ def test_COIN_NET():
     os.environ['NET'] = 'testnet'
     e = Env()
     assert e.coin == lib_coins.BitcoinCashTestnet
-    os.environ['NET'] = ' testnet '
-    e = Env()
-    assert e.coin == lib_coins.BitcoinCashTestnet
     os.environ.pop('NET')
-    os.environ['COIN'] = ' Litecoin '
+    os.environ['COIN'] = 'Litecoin'
     e = Env()
     assert e.coin == lib_coins.Litecoin
     os.environ['NET'] = 'testnet'
@@ -100,23 +97,10 @@ def test_HOST():
     assert_default('HOST', 'host', 'localhost')
     os.environ['HOST'] = ''
     e = Env()
-    assert e.cs_host(for_rpc=False) == ''
+    assert e.cs_host() == ''
     os.environ['HOST'] = '192.168.0.1,23.45.67.89'
     e = Env()
-    assert e.cs_host(for_rpc=False) == ['192.168.0.1', '23.45.67.89']
-    os.environ['HOST'] = '192.168.0.1 , 23.45.67.89 '
-    e = Env()
-    assert e.cs_host(for_rpc=False) == ['192.168.0.1', '23.45.67.89']
-
-def test_RPC_HOST():
-    assert_default('RPC_HOST', 'rpc_host', 'localhost')
-    os.environ['RPC_HOST'] = ''
-    e = Env()
-    # Blank reverts to localhost
-    assert e.cs_host(for_rpc=True) == 'localhost'
-    os.environ['RPC_HOST'] = '127.0.0.1, ::1'
-    e = Env()
-    assert e.cs_host(for_rpc=True) == ['127.0.0.1', '::1']
+    assert e.cs_host() == ['192.168.0.1', '23.45.67.89']
 
 def test_REORG_LIMIT():
     assert_integer('REORG_LIMIT', 'reorg_limit',
@@ -136,7 +120,6 @@ def test_SSL_PORT():
     with pytest.raises(Env.Error):
         Env()
     os.environ['SSL_CERTFILE'] = 'certfile'
-    Env()
     os.environ.pop('SSL_PORT')
     assert_integer('SSL_PORT', 'ssl_port', None)
 
@@ -160,13 +143,6 @@ def test_MAX_SEND():
 
 def test_MAX_SUBS():
     assert_integer('MAX_SUBS', 'max_subs', 250000)
-
-def test_MAX_SESSIONS():
-    too_big = 1000000
-    os.environ['MAX_SESSIONS'] = str(too_big)
-    e = Env()
-    assert e.max_sessions < too_big
-    # Cannot test default as it may be lowered by the open file limit cap
 
 def test_MAX_SESSION_SUBS():
     assert_integer('MAX_SESSION_SUBS', 'max_session_subs', 50000)
@@ -207,17 +183,7 @@ def test_ANON_LOGS():
     assert_boolean('ANON_LOGS', 'anon_logs', False)
 
 def test_PEER_DISCOVERY():
-    e = Env()
-    assert e.peer_discovery == Env.PD_ON
-    os.environ['PEER_DISCOVERY'] = ' '
-    e = Env()
-    assert e.peer_discovery == Env.PD_OFF
-    os.environ['PEER_DISCOVERY'] = 'ON'
-    e = Env()
-    assert e.peer_discovery == Env.PD_ON
-    os.environ['PEER_DISCOVERY'] = 'self'
-    e = Env()
-    assert e.peer_discovery == Env.PD_SELF
+    assert_boolean('PEER_DISCOVERY', 'peer_discovery', True)
 
 def test_PEER_ANNOUNCE():
     assert_boolean('PEER_ANNOUNCE', 'peer_announce', True)
@@ -230,6 +196,12 @@ def test_TOR_PROXY_HOST():
 
 def test_TOR_PROXY_PORT():
     assert_integer('TOR_PROXY_PORT', 'tor_proxy_port', None)
+
+def test_IRC():
+    assert_boolean('IRC', 'irc', False)
+
+def test_IRC_NICK():
+    assert_default('IRC_NICK', 'irc_nick', None)
 
 def test_clearnet_identity():
     os.environ['REPORT_TCP_PORT'] = '456'
@@ -257,24 +229,23 @@ def test_clearnet_identity():
     os.environ['REPORT_HOST'] = '$HOST'
     with pytest.raises(Env.Error):
         Env()
-    # Accept private IP, unless PEER_ANNOUNCE
+    # Accept private IP, unless IRC or PEER_ANNOUNCE
+    os.environ.pop('IRC', None)
     os.environ['PEER_ANNOUNCE'] = ''
     os.environ['REPORT_HOST'] = '192.168.0.1'
     os.environ['SSL_CERTFILE'] = 'certfile'
     os.environ['SSL_KEYFILE'] = 'keyfile'
     Env()
+    os.environ['IRC'] = 'OK'
+    with pytest.raises(Env.Error):
+        Env()
+    os.environ.pop('IRC', None)
     os.environ['PEER_ANNOUNCE'] = 'OK'
-    with pytest.raises(Env.Error) as err:
+    with pytest.raises(Env.Error):
         Env()
-    os.environ.pop('PEER_ANNOUNCE', None)
-    assert 'not a valid REPORT_HOST' in str(err)
-
-    os.environ['REPORT_HOST'] = '1.2.3.4'
     os.environ['REPORT_SSL_PORT'] = os.environ['REPORT_TCP_PORT']
-    with pytest.raises(Env.Error) as err:
+    with pytest.raises(Env.Error):
         Env()
-    assert 'both resolve' in str(err)
-
     os.environ['REPORT_SSL_PORT'] = '457'
     os.environ['REPORT_HOST'] = 'foo.com'
     e = Env()

@@ -18,20 +18,18 @@ from time import strptime
 
 import aiohttp
 
-from lib.util import LoggedClass, int_to_varint, hex_to_bytes
+import lib.util as util
 from lib.hash import hex_str_to_hash
-from lib.jsonrpc import JSONRPC
 
 
 class DaemonError(Exception):
     '''Raised when the daemon returns an error in its results.'''
 
 
-class Daemon(LoggedClass):
+class Daemon(util.LoggedClass):
     '''Handles connections to a daemon at the given URL.'''
 
     WARMING_UP = -28
-    RPC_MISC_ERROR = -1
 
     class DaemonWarmingUpError(Exception):
         '''Raised when the daemon returns an error in its results.'''
@@ -56,7 +54,6 @@ class Daemon(LoggedClass):
         else:
             self.ClientHttpProcessingError = asyncio.TimeoutError
             self.ClientPayloadError = aiohttp.ClientPayloadError
-        self._available_rpcs = {}  # caches results for _is_rpc_available()
 
     def next_req_id(self):
         '''Retrns the next request ID.'''
@@ -100,7 +97,7 @@ class Daemon(LoggedClass):
                     # If bitcoind can't find a tx, for some reason
                     # it returns 500 but fills out the JSON.
                     # Should still return 200 IMO.
-                    if resp.status in (200, 404, 500):
+                    if resp.status in (200, 500):
                         return await resp.json()
                     return (resp.status, resp.reason)
 
@@ -197,34 +194,6 @@ class Daemon(LoggedClass):
             return await self._send(payload, processor)
         return []
 
-    async def _is_rpc_available(self, method):
-        '''Return whether given RPC method is available in the daemon.
-
-        Results are cached and the daemon will generally not be queried with
-        the same method more than once.'''
-        available = self._available_rpcs.get(method, None)
-        if available is None:
-            try:
-                await self._send_single(method)
-                available = True
-            except DaemonError as e:
-                err = e.args[0]
-                error_code = err.get("code")
-                if error_code == JSONRPC.METHOD_NOT_FOUND:
-                    available = False
-                elif error_code == self.RPC_MISC_ERROR:
-                    # method found but exception was thrown in command handling
-                    # probably because we did not provide arguments
-                    available = True
-                else:
-                    self.logger.warning('unexpected error (code {:d}: {}) when '
-                                        'testing RPC availability of method {}'
-                                        .format(error_code, err.get("message"),
-                                                method))
-                    available = False
-            self._available_rpcs[method] = available
-        return available
-
     async def block_hex_hashes(self, first, count):
         '''Return the hex hashes of count block starting at height first.'''
         params_iterable = ((h, ) for h in range(first, first + count))
@@ -239,7 +208,7 @@ class Daemon(LoggedClass):
         params_iterable = ((h, False) for h in hex_hashes)
         blocks = await self._send_vector('getblock', params_iterable)
         # Convert hex string to bytes
-        return [hex_to_bytes(block) for block in blocks]
+        return [bytes.fromhex(block) for block in blocks]
 
     async def mempool_hashes(self):
         '''Update our record of the daemon's mempool hashes.'''
@@ -247,9 +216,6 @@ class Daemon(LoggedClass):
 
     async def estimatefee(self, params):
         '''Return the fee estimate for the given parameters.'''
-        if await self._is_rpc_available('estimatesmartfee'):
-            estimate = await self._send_single('estimatesmartfee', params)
-            return estimate.get('feerate', -1)
         return await self._send_single('estimatefee', params)
 
     async def getnetworkinfo(self):
@@ -274,7 +240,7 @@ class Daemon(LoggedClass):
         txs = await self._send_vector('getrawtransaction', params_iterable,
                                       replace_errs=replace_errs)
         # Convert hex strings to bytes
-        return [hex_to_bytes(tx) if tx else None for tx in txs]
+        return [bytes.fromhex(tx) if tx else None for tx in txs]
 
     async def sendrawtransaction(self, params):
         '''Broadcast a transaction to the network.'''
@@ -370,7 +336,7 @@ class LegacyRPCDaemon(Daemon):
         raw_block = header
         num_txs = len(transactions)
         if num_txs > 0:
-            raw_block += int_to_varint(num_txs)
+            raw_block += util.int_to_varint(num_txs)
             raw_block += b''.join(transactions)
         else:
             raw_block += b'\x00'

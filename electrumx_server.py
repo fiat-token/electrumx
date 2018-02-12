@@ -18,7 +18,7 @@ from server.controller import Controller
 
 def main():
     '''Set up logging and run the server.'''
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     logging.info('ElectrumX server starting')
     try:
         controller = Controller(Env())

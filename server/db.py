@@ -32,7 +32,7 @@ class DB(util.LoggedClass):
     it was shutdown uncleanly.
     '''
 
-    DB_VERSIONS = [6]
+    DB_VERSIONS = [5]
 
     class MissingUTXOError(Exception):
         '''Raised if a mempool tx input UTXO couldn't be found.'''
@@ -662,7 +662,7 @@ class DB(util.LoggedClass):
         while self.comp_cursor != -1:
             if self.semaphore.locked:
                 self.log_info('compact_history: waiting on semaphore...')
-            async with self.semaphore:
+            with await self.semaphore:
                 await loop.run_in_executor(None, self._compact_history, limit)
 
     def cancel_history_compaction(self):

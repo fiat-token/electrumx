@@ -33,8 +33,9 @@ from ipaddress import ip_address
 import logging
 import re
 import sys
+import struct
 from collections import Container, Mapping
-from struct import pack, Struct
+from struct import pack
 
 
 class LoggedClass(object):
@@ -140,27 +141,49 @@ def subclasses(base_class, strict=True):
     pairs = inspect.getmembers(sys.modules[base_class.__module__], select)
     return [pair[1] for pair in pairs]
 
+def varint_to_int(integer):
+    '''Given a varint will return a tuple made with the format of the C struct and the relative number of bytes'''
+    if integer < 253:
+        return ('B', 1)
+    if integer == 253:
+        return ('H', 2)
+    if integer == 254:
+        return ('I', 4)
+    return ('Q', 8)
+
+def get_varint(array, cursor):
+    '''Parse the varint then read the length (given by the varint) of the object. 
+    Return the updated cursor/index of the array along with the content of the varint and the object '''
+    format_C_Type, numberBytes = varint_to_int(array[cursor])
+
+    default, = struct.unpack('<B', array[80:81])
+    suma = cursor + numberBytes
+    buff = array[cursor:suma]
+    if numberBytes != 1: cursor += 1 # because the varint is already indicating the length of the object and not the number of bytes to be read
+    obj_length, = struct.unpack('<' + format_C_Type, buff)
+
+    cursor += numberBytes
+    obj = array[cursor:cursor + obj_length]
+    cursor += obj_length
+    return (cursor, obj_length, obj)
 
 def chunks(items, size):
     '''Break up items, an iterable, into chunks of length size.'''
     for i in range(0, len(items), size):
         yield items[i: i + size]
 
-
 def bytes_to_int(be_bytes):
     '''Interprets a big-endian sequence of bytes as an integer'''
     return int.from_bytes(be_bytes, 'big')
-
 
 def int_to_bytes(value):
     '''Converts an integer to a big-endian sequence of bytes'''
     return value.to_bytes((value.bit_length() + 7) // 8, 'big')
 
-
 def int_to_varint(value):
     '''Converts an integer to a Bitcoin-like varint bytes'''
     if value < 0:
-        raise ValueError("attempt to write size < 0")
+        raise Exception("attempt to write size < 0")
     elif value < 253:
         return pack('<B', value)
     elif value < 2**16:
@@ -309,11 +332,3 @@ def protocol_version(client_req, server_min, server_max):
         result = None
 
     return result
-
-unpack_int32_from = Struct('<i').unpack_from
-unpack_int64_from = Struct('<q').unpack_from
-unpack_uint16_from = Struct('<H').unpack_from
-unpack_uint32_from = Struct('<I').unpack_from
-unpack_uint64_from = Struct('<Q').unpack_from
-
-hex_to_bytes = bytes.fromhex

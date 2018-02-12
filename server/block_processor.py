@@ -20,6 +20,7 @@ from server.daemon import DaemonError
 from server.version import VERSION
 from lib.hash import hash_to_str
 from lib.util import chunks, formatted_time, LoggedClass
+from lib.tx import DeserializerVirtualToken
 import server.db
 
 
@@ -64,7 +65,7 @@ class Prefetcher(LoggedClass):
         Used in blockchain reorganisations.  This coroutine can be
         called asynchronously to the _prefetch coroutine so we must
         synchronize with a semaphore.'''
-        async with self.semaphore:
+        with await self.semaphore:
             self.fetched_height = self.bp.height
             self.refill_event.set()
 
@@ -85,7 +86,7 @@ class Prefetcher(LoggedClass):
         '''
         daemon = self.bp.daemon
         daemon_height = await daemon.height(self.bp.caught_up_event.is_set())
-        async with self.semaphore:
+        with await self.semaphore:
             while self.cache_size < self.min_cache_size:
                 # Try and catch up all blocks but limit to room in cache.
                 # Constrain fetch count to between 0 and 500 regardless;
@@ -110,6 +111,7 @@ class Prefetcher(LoggedClass):
 
                 # Special handling for genesis block
                 if first == 0:
+                    #blocks.pop(0)
                     blocks[0] = self.bp.coin.genesis_block(blocks[0])
                     self.logger.info('verified genesis block with hash {}'
                                      .format(hex_hashes[0]))
@@ -241,8 +243,17 @@ class BlockProcessor(server.db.DB):
 
         blocks = [self.coin.block(raw_block, first + n)
                   for n, raw_block in enumerate(raw_blocks)]
-        headers = [block.header for block in blocks]
+
+        headers = []
+        for block in blocks:
+            deserializer = DeserializerVirtualToken(block.raw)
+            header = deserializer.read_genesis_header(0, 80)
+            headers.append(header)
+        #headers = [DeserializerVirtualToken(block).read_genesis_header(0, DeserializerVirtualToken.NEW_HEADER_SIZE) for block in blocks]
+
+        # headers = [block.header for block in blocks]
         hprevs = [self.coin.header_prevhash(h) for h in headers]
+
         chain = [self.tip] + [self.coin.header_hash(h) for h in headers[:-1]]
 
         if hprevs == chain:
@@ -253,8 +264,6 @@ class BlockProcessor(server.db.DB):
                 self.logger.info('processed {:,d} block{} in {:.1f}s'
                                  .format(len(blocks), s,
                                          time.time() - start))
-                self.controller.mempool.on_new_block(self.touched)
-            self.touched.clear()
         elif hprevs[0] != chain[0]:
             await self.reorg_chain()
         else:
@@ -513,6 +522,7 @@ class BlockProcessor(server.db.DB):
         if self.caught_up_event.is_set():
             self.flush(True)
         else:
+            self.touched.clear()
             if time.time() > self.next_cache_check:
                 self.check_cache_size()
                 self.next_cache_check = time.time() + 30
